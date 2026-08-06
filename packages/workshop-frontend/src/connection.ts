@@ -1,6 +1,7 @@
 import { newWebSocketRpcSession, RpcStub } from 'capnweb'
 import { PublicApi } from '@gadgets/workshop-shared/api'
 import { createConnectionManager } from './connectionManager'
+import { reportIssue } from './errorReporting'
 
 // The app's singleton connection: manager wiring plus browser wake signals.
 
@@ -18,7 +19,17 @@ function makeSession(): RpcStub<PublicApi> {
   return newWebSocketRpcSession<PublicApi>(wsUrl)
 }
 
-const manager = createConnectionManager({ makeSession })
+const manager = createConnectionManager({
+  makeSession,
+  // One aggregated report per outage, at recovery — rate-limited server-side and a no-op
+  // unless frontend error reporting is configured. The reporter's fingerprint dedup further
+  // caps this at ~1 report/min per client during flapping; accepted as intentional rate limiting.
+  onOutageEnd: (outage) => {
+    reportIssue('connection.outage', new Error(JSON.stringify(outage)), {
+      severity: 'warning', handled: true,
+    })
+  },
+})
 
 export const subscribeConnection = manager.subscribe
 export const getConnectionSnapshot = manager.getSnapshot

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RpcStub } from 'capnweb'
 import { PublicApi } from '@gadgets/workshop-shared/api'
-import { createConnectionManager } from './connectionManager'
+import { createConnectionManager, OutageSummary } from './connectionManager'
 
 type FakeStub = {
   brokenCbs: Array<(err: unknown) => void>
@@ -31,9 +31,11 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 function makeHarness() {
   const stubs: FakeStub[] = []
   const pendingSleeps: Array<{ ms: number; resolve: () => void }> = []
+  const outages: OutageSummary[] = []
   let clock = 0
 
   const manager = createConnectionManager({
+    onOutageEnd: (outage) => { outages.push(outage) },
     makeSession: () => {
       const stub = makeFakeStub()
       stubs.push(stub)
@@ -48,7 +50,7 @@ function makeHarness() {
   manager.subscribe(() => { notifications++ })
 
   return {
-    manager, stubs, pendingSleeps,
+    manager, stubs, pendingSleeps, outages,
     get notifications() { return notifications },
     advanceClock: (ms: number) => { clock += ms },
     // Resolves the newest pending sleep of the given duration. Backoff and probe-timeout
@@ -100,6 +102,10 @@ describe('createConnectionManager', () => {
     expect(snapshot.stub).toBe(s2 as unknown as RpcStub<PublicApi>)
     expect(h.notifications).toBe(2)
     expect(s0.disposed).toBe(false)  // the broken stub is capnweb's to clean up
+    expect(h.outages).toHaveLength(1)
+    expect(h.outages[0]).toMatchObject({
+      trigger: 'broken', attempts: 2, reason: 'Error: Peer closed WebSocket: 1006 ',
+    })
   })
 
   it('doubles backoff up to the cap', async () => {
@@ -107,7 +113,10 @@ describe('createConnectionManager', () => {
     await h.breakCurrent(new Error('Peer closed WebSocket: 1006 '))
 
     for (const backoff of [1000, 2000, 4000, 8000, 10000, 10000]) {
+      const stubsBefore = h.stubs.length
       await h.elapse(backoff)
+      // A new candidate appears only once this step's full backoff has elapsed.
+      expect(h.stubs.length).toBe(stubsBefore + 1)
       const candidate = h.stubs[h.stubs.length - 1]
       candidate.probes[0].reject(new Error('WebSocket connection failed.'))
       await tick()
@@ -146,7 +155,9 @@ describe('createConnectionManager', () => {
 
     const woke = h.manager.onWakeSignal()
     await tick()
-    s0.probes[0].reject(new Error('probe failed'))
+    s0.probes[0].reject(Object.assign(new Error('probe failed'), {
+      durableObjectReset: true, durableObjectId: 'abc123',
+    }))
     await woke
     await tick()
 
@@ -158,6 +169,9 @@ describe('createConnectionManager', () => {
 
     expect(h.manager.getSnapshot().connectionLost).toBe(false)
     expect(h.notifications).toBe(2)
+    expect(h.outages[0]).toMatchObject({
+      trigger: 'wake-zombie', doReset: true, durableObjectIds: ['abc123'],
+    })
   })
 
   it('ignores wake signals while the connection is fresh', async () => {
