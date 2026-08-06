@@ -1,11 +1,18 @@
+// Vitest runs under node, but the src/ tsconfig only has browser types — hence the suppressions.
+// @ts-expect-error node builtin without @types/node
+import { readFileSync } from 'node:fs'
+// @ts-expect-error node builtin without @types/node
+import { createRequire } from 'node:module'
 import { describe, expect, it, vi } from 'vitest'
+import { deserialize, serialize } from 'capnweb'
+import { AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api'
 
-vi.mock('./errorReporting', () => ({ reportIssue: vi.fn() }))
+vi.mock('./errorReporting', () => ({ reportIssue: vi.fn<(site: string, err: unknown, options?: object) => void>() }))
 
 import { reportIssue } from './errorReporting'
 import {
   classifyRpcError, getDurableObjectId, isDurableObjectResetError, isOverloadedError,
-  isTransientRpcError, logRpcFailure, reportDoResetError, withDoResetRetry,
+  CONNECTION_MESSAGES, isTransientRpcError, logRpcFailure, reportDoResetError, withDoResetRetry,
 } from './rpcErrors'
 
 // The reject frame observed in prod for a DO storage-timeout reset.
@@ -31,6 +38,8 @@ describe('classifyRpcError', () => {
       'Durable Object reset because its code was updated.',
       "Durable Object's isolate exceeded its memory limit and was reset.",
       'Durable Object exceeded its CPU time limit and was reset.',
+      // What later calls on an already-dead capability reject with (flagless).
+      'The execution context which hosts this callback is no longer running.',
     ]) {
       expect(classifyRpcError(new Error(message))).toBe('do-reset')
     }
@@ -50,9 +59,15 @@ describe('classifyRpcError', () => {
     expect(classifyRpcError(new Error('WebSocket connection failed.'))).toBe('connection')
     expect(classifyRpcError(new Error('RPC session was shut down by disposing the main stub')))
         .toBe('connection')
+    expect(classifyRpcError(new Error('Attempted to use RPC stub after it has been disposed.')))
+        .toBe('connection')
   })
 
   it('classifies auth failures, which must never be retried or quieted', () => {
+    // Coded errors are authoritative; bare messages are the fallback for older deployments.
+    expect(classifyRpcError(createAuthError(AUTH_ERROR_CODES.invalidSessionToken))).toBe('auth')
+    expect(classifyRpcError(Object.assign(new Error('nope'), { code: 'INVALID_SESSION_TOKEN' })))
+        .toBe('auth')
     expect(classifyRpcError(new Error('invalid session token'))).toBe('auth')
     expect(classifyRpcError(new Error('Not authenticated with Access.'))).toBe('auth')
   })
@@ -102,7 +117,7 @@ describe('withDoResetRetry', () => {
   it('retries once after a reset error', async () => {
     vi.useFakeTimers()
     try {
-      const fn = vi.fn().mockRejectedValueOnce(storageTimeoutReset()).mockResolvedValueOnce('ok')
+      const fn = vi.fn<() => Promise<string>>().mockRejectedValueOnce(storageTimeoutReset()).mockResolvedValueOnce('ok')
       const result = withDoResetRetry(fn)
       await vi.advanceTimersByTimeAsync(2000)
       expect(await result).toBe('ok')
@@ -113,15 +128,38 @@ describe('withDoResetRetry', () => {
   })
 
   it('does not retry non-reset errors', async () => {
-    const fn = vi.fn().mockRejectedValue(new Error('Workspace not found.'))
+    const fn = vi.fn<() => Promise<string>>().mockRejectedValue(new Error('Workspace not found.'))
     await expect(withDoResetRetry(fn)).rejects.toThrow('Workspace not found.')
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries once on a retryable-flagged invocation failure', async () => {
+    vi.useFakeTimers()
+    try {
+      const fn = vi.fn<() => Promise<string>>()
+        .mockRejectedValueOnce(Object.assign(new Error('internal error'), { remote: true, retryable: true }))
+        .mockResolvedValueOnce('ok')
+      const result = withDoResetRetry(fn)
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(await result).toBe('ok')
+      expect(fn).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Local transport errors carry no flags; their recovery belongs to the connection manager,
+  // so the retry must refuse them even though they classify as transient.
+  it('does not retry flagless transport errors', async () => {
+    const fn = vi.fn<() => Promise<string>>().mockRejectedValue(new Error('Peer closed WebSocket'))
+    await expect(withDoResetRetry(fn)).rejects.toThrow('Peer closed WebSocket')
     expect(fn).toHaveBeenCalledTimes(1)
   })
 
   it('gives up after the second failure', async () => {
     vi.useFakeTimers()
     try {
-      const fn = vi.fn().mockRejectedValue(storageTimeoutReset())
+      const fn = vi.fn<() => Promise<string>>().mockRejectedValue(storageTimeoutReset())
       const result = withDoResetRetry(fn)
       result.catch(() => {})
       await vi.advanceTimersByTimeAsync(2000)
@@ -148,5 +186,34 @@ describe('logRpcFailure', () => {
       debug.mockRestore()
       error.mockRestore()
     }
+  })
+})
+
+// Canary: these client-local errors carry no flags, so the classifier matches capnweb's message
+// strings. Pin them to the installed build so an upgrade fails here, not silently in the UX.
+describe('capnweb transport messages', () => {
+  it('still exist in the installed capnweb build', () => {
+    const require = createRequire(import.meta.url)
+    const source = readFileSync(require.resolve('capnweb'), 'utf8')
+    for (const message of CONNECTION_MESSAGES) {
+      expect(source, `capnweb no longer raises "${message}"`).toContain(message)
+    }
+  })
+})
+
+// Canary: the classifier's primary path reads flags/codes off the deserialized error, so pin
+// capnweb's custom-property round-trip too (serialize/deserialize use the same wire frame as
+// RPC rejections). A regression here would silently demote every classification to the message
+// fallback and drop auth codes entirely.
+describe('capnweb error serialization', () => {
+  it('round-trips the custom properties the classifier reads', () => {
+    const sent = Object.assign(storageTimeoutReset(), { code: AUTH_ERROR_CODES.invalidSessionToken })
+    const received = deserialize(serialize(sent)) as Error & Record<string, unknown>
+    expect(received).toBeInstanceOf(Error)
+    expect(received.durableObjectReset).toBe(true)
+    expect(received.overloaded).toBe(true)
+    expect(received.durableObjectId).toBe('eed0859e')
+    expect(received.code).toBe(AUTH_ERROR_CODES.invalidSessionToken)
+    expect(classifyRpcError(received)).toBe('do-reset')
   })
 })

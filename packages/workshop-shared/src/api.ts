@@ -285,6 +285,40 @@ function isOpenGadgetErrorCode(value: unknown): value is OpenGadgetErrorCode {
       value === OPEN_GADGET_ERROR_CODES.workspaceAccessDenied;
 }
 
+/** Stable error codes attached to authentication failures. */
+export const AUTH_ERROR_CODES = {
+  invalidSessionToken: "INVALID_SESSION_TOKEN",
+  notAuthenticatedWithAccess: "NOT_AUTHENTICATED_WITH_ACCESS",
+} as const;
+
+/** An expected authentication failure code. */
+export type AuthErrorCode = typeof AUTH_ERROR_CODES[keyof typeof AUTH_ERROR_CODES];
+
+/** Messages for auth failures thrown without a surviving code; clients match these only as a
+ * classification fallback, so changing one is a compatibility break with older deployments. */
+export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
+  [AUTH_ERROR_CODES.invalidSessionToken]: "invalid session token",
+  [AUTH_ERROR_CODES.notAuthenticatedWithAccess]: "Not authenticated with Access.",
+};
+
+/** Creates an authentication failure with a machine-readable code. */
+export function createAuthError(code: AuthErrorCode): Error & { code: AuthErrorCode } {
+  return Object.assign(new Error(AUTH_ERROR_MESSAGES[code]), { code });
+}
+
+/** Reads the machine-readable code from an authentication failure. */
+export function getAuthErrorCode(error: unknown): AuthErrorCode | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+
+  const candidate = "code" in error ? error.code : undefined;
+  return isAuthErrorCode(candidate) ? candidate : undefined;
+}
+
+function isAuthErrorCode(value: unknown): value is AuthErrorCode {
+  return value === AUTH_ERROR_CODES.invalidSessionToken ||
+      value === AUTH_ERROR_CODES.notAuthenticatedWithAccess;
+}
+
 // Top-level API exposed to the user after they have authenticated.
 export interface AuthenticatedApi extends RpcTarget {
   // Get profile info for the user who is logged in.
