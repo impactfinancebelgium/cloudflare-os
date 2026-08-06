@@ -2,7 +2,7 @@ import { newWebSocketRpcSession, RpcStub } from 'capnweb'
 import { PublicApi } from '@gadgets/workshop-shared/api'
 import { createConnectionManager } from './connectionManager'
 
-// The app's singleton connection.
+// The app's singleton connection: manager wiring plus browser wake signals.
 
 function getBackendHost(): string {
   const backendHost = import.meta.env.VITE_BACKEND_HOST?.trim()
@@ -22,3 +22,8 @@ const manager = createConnectionManager({ makeSession })
 
 export const subscribeConnection = manager.subscribe
 export const getConnectionSnapshot = manager.getSnapshot
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void manager.onWakeSignal()
+})
+window.addEventListener('online', () => void manager.onWakeSignal())

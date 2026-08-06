@@ -31,6 +31,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 function makeHarness() {
   const stubs: FakeStub[] = []
   const pendingSleeps: Array<{ ms: number; resolve: () => void }> = []
+  let clock = 0
 
   const manager = createConnectionManager({
     makeSession: () => {
@@ -38,6 +39,7 @@ function makeHarness() {
       stubs.push(stub)
       return stub as unknown as RpcStub<PublicApi>
     },
+    now: () => clock,
     sleep: (ms) => new Promise<void>((resolve) => { pendingSleeps.push({ ms, resolve }) }),
     random: () => 0.5,  // jitter factor exactly 1.0
   })
@@ -48,6 +50,7 @@ function makeHarness() {
   return {
     manager, stubs, pendingSleeps,
     get notifications() { return notifications },
+    advanceClock: (ms: number) => { clock += ms },
     // Resolves the newest pending sleep of the given duration. Backoff and probe-timeout
     // sleeps coexist (settled races leave their timeout sleeps pending forever), and the
     // current attempt's sleep is always the most recently created.
@@ -124,5 +127,44 @@ describe('createConnectionManager', () => {
     await tick()
     expect(h.manager.getSnapshot().connectionLost).toBe(false)
     expect(h.notifications).toBe(2)
+  })
+
+  it('a wake signal short-circuits the backoff sleep', async () => {
+    const h = makeHarness()
+    await h.breakCurrent(new Error('Peer closed WebSocket: 1006 '))
+    expect(h.stubs).toHaveLength(1)  // still sleeping, no attempt yet
+
+    await h.manager.onWakeSignal()
+    await tick()
+    expect(h.stubs).toHaveLength(2)  // attempt started without waiting out the backoff
+  })
+
+  it('probes a stale connection on wake and reconnects without backoff', async () => {
+    const h = makeHarness()
+    const [s0] = h.stubs
+    h.advanceClock(20000)
+
+    const woke = h.manager.onWakeSignal()
+    await tick()
+    s0.probes[0].reject(new Error('probe failed'))
+    await woke
+    await tick()
+
+    expect(s0.disposed).toBe(true)
+    expect(h.notifications).toBe(1)
+    const s1 = h.stubs[1]  // created immediately: no backoff sleep before the first attempt
+    s1.probes[0].resolve({})
+    await tick()
+
+    expect(h.manager.getSnapshot().connectionLost).toBe(false)
+    expect(h.notifications).toBe(2)
+  })
+
+  it('ignores wake signals while the connection is fresh', async () => {
+    const h = makeHarness()
+    const [s0] = h.stubs
+    h.advanceClock(5000)  // under the idle threshold
+    await h.manager.onWakeSignal()
+    expect(s0.probes).toHaveLength(0)
   })
 })
