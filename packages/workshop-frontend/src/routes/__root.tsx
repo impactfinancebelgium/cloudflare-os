@@ -1,3 +1,4 @@
+import { withDoResetRetry } from '../rpcErrors'
 import { useState, useEffect } from 'react'
 import { createRootRoute, Outlet, useRouterState } from '@tanstack/react-router'
 import { TooltipProvider, Toasty } from '@cloudflare/kumo'
@@ -151,7 +152,7 @@ function AuthenticatedShell({
 
   useEffect(() => {
     let cancelled = false
-    authenticatedApi.isOnboardingCompleted().then((completed) => {
+    withDoResetRetry(() => authenticatedApi.isOnboardingCompleted()).then((completed) => {
       if (!cancelled) setOnboardingNeeded(!completed)
     }).catch((err) => {
       console.error('Failed to check onboarding status:', err)

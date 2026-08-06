@@ -1,3 +1,4 @@
+import { withDoResetRetry } from '../../rpcErrors'
 import {
   createContext,
   useCallback,
@@ -89,8 +90,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   useEffect(() => {
     let cancelled = false
     setGadgetsLoading(true)
-    authenticatedApi
-      .listGadgets()
+    withDoResetRetry(() => authenticatedApi.listGadgets())
       .then((list) => {
         if (cancelled) return
         setGadgets(list)

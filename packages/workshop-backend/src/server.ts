@@ -74,7 +74,7 @@ type Env = Cloudflare.Env & {
 @validateRpc()
 class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   constructor(private ctx: ExecutionContext, private env: Env,
-      private user: DurableObjectStub<UserDurableObject>,
+      private userId: DurableObjectId,
       private abortSession: (reason: Error) => void) {
     super();
 
@@ -86,6 +86,13 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   private overseers: DurableObjectNamespace<OverseerDurableObject>;
   private adminSettings: DurableObjectNamespace<AdminSettings>;
   private users: DurableObjectNamespace<UserDurableObject>;
+
+  // A stub is bound to one incarnation of the DO and is poisoned once that incarnation resets,
+  // so re-resolve per call instead of caching one for the session (per the DO error-handling
+  // docs: create a fresh stub per attempt). Stub creation is local and lazy — not a network call.
+  private get user(): DurableObjectStub<UserDurableObject> {
+    return this.users.get(this.userId);
+  }
 
   #isAdmin(): boolean {
     let name = this.user.id.name;
@@ -675,7 +682,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       user_id: userId.toString(),
       source: "session_token",
     });
-    return new AuthenticatedApiImpl(this.ctx, this.env, stub, this.abortSession);
+    return new AuthenticatedApiImpl(this.ctx, this.env, userId, this.abortSession);
   }
 
   async authenticateFromCfAccess(): Promise<AuthenticatedApi> {
@@ -700,7 +707,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
       user_id: userId.toString(),
       source: "cf_access",
     });
-    return new AuthenticatedApiImpl(this.ctx, this.env, stub, this.abortSession);
+    return new AuthenticatedApiImpl(this.ctx, this.env, userId, this.abortSession);
   }
 
   async login(username: string, passwordHash: Uint8Array): Promise<string | null> {

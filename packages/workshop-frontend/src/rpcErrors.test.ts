@@ -5,7 +5,7 @@ vi.mock('./errorReporting', () => ({ reportIssue: vi.fn() }))
 import { reportIssue } from './errorReporting'
 import {
   classifyRpcError, getDurableObjectId, isDurableObjectResetError, isOverloadedError,
-  isTransientRpcError, reportDoResetError,
+  isTransientRpcError, reportDoResetError, withDoResetRetry,
 } from './rpcErrors'
 
 // The reject frame observed in prod for a DO storage-timeout reset.
@@ -95,5 +95,40 @@ describe('reportDoResetError', () => {
     reportDoResetError('chat.send', err, { gadgetId: 'g1' })
     expect(reportIssue).toHaveBeenCalledWith('do-reset.chat.send', err,
         { severity: 'warning', handled: true, gadgetId: 'g1' })
+  })
+})
+
+describe('withDoResetRetry', () => {
+  it('retries once after a reset error', async () => {
+    vi.useFakeTimers()
+    try {
+      const fn = vi.fn().mockRejectedValueOnce(storageTimeoutReset()).mockResolvedValueOnce('ok')
+      const result = withDoResetRetry(fn)
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(await result).toBe('ok')
+      expect(fn).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not retry non-reset errors', async () => {
+    const fn = vi.fn().mockRejectedValue(new Error('Workspace not found.'))
+    await expect(withDoResetRetry(fn)).rejects.toThrow('Workspace not found.')
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives up after the second failure', async () => {
+    vi.useFakeTimers()
+    try {
+      const fn = vi.fn().mockRejectedValue(storageTimeoutReset())
+      const result = withDoResetRetry(fn)
+      result.catch(() => {})
+      await vi.advanceTimersByTimeAsync(2000)
+      await expect(result).rejects.toThrow('exceeded timeout')
+      expect(fn).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

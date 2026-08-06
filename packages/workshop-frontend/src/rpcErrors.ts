@@ -58,6 +58,20 @@ export function isTransientRpcError(err: unknown): boolean {
   return cls === 'do-reset' || cls === 'connection'
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Retries an idempotent call once after a DO reset: the object restarts on its next request,
+// so a single delayed attempt usually succeeds. Never use for writes.
+export async function withDoResetRetry<T>(fn: () => Promise<T>, delayMs = 1500): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (!isDurableObjectResetError(err)) throw err
+    await sleep(delayMs * (0.75 + Math.random() * 0.5))
+    return fn()
+  }
+}
+
 /** Reports a DO-reset error to the client-errors endpoint (no-op unless reporting is enabled). */
 export function reportDoResetError(site: string, err: unknown, options?: { gadgetId?: string }) {
   reportIssue(`do-reset.${site}`, err, { severity: 'warning', handled: true, ...options })

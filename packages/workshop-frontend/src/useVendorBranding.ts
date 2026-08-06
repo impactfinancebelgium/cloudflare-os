@@ -1,3 +1,4 @@
+import { withDoResetRetry } from './rpcErrors'
 import { useEffect, useState } from 'react'
 import { RpcStub } from 'capnweb'
 import { AuthenticatedApi } from '@gadgets/workshop-shared/api'
@@ -31,7 +32,7 @@ export function useVendorBranding(
     if (!promise) {
       const api = authenticatedApi
       promise = (async () => {
-        const vendors = await api.listGatekeeperVendors()
+        const vendors = await withDoResetRetry(() => api.listGatekeeperVendors())
         const map = new Map<string, VendorBranding>()
         for (const vendor of vendors) {
           const { logo, color } = vendor.description

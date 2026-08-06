@@ -1,3 +1,4 @@
+import { withDoResetRetry } from "../rpcErrors";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useKumoToastManager } from "@cloudflare/kumo";
@@ -57,8 +58,7 @@ export function HomePageContent({ prompt }: HomeSearch) {
 
   useEffect(() => {
     let cancelled = false;
-    authenticatedApi
-      .listModels()
+    withDoResetRetry(() => authenticatedApi.listModels())
       .then((list) => {
         if (cancelled) return;
         setModels(list);

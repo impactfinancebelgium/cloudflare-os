@@ -1,3 +1,4 @@
+import { withDoResetRetry } from '../rpcErrors'
 import { Plus } from '@phosphor-icons/react'
 import { Link } from '@tanstack/react-router'
 import { useAuthenticatedApi } from '../AuthContext'
@@ -45,7 +46,7 @@ export default function ConnectionChips() {
     }
 
     const subscriber = new ChipsSubscriber()
-    const subPromise = authenticatedApi.subscribeConnectedAccounts(subscriber)
+    const subPromise = withDoResetRetry(() => authenticatedApi.subscribeConnectedAccounts(subscriber))
     subPromise.then((stub) => {
       if (cancelled) {
         stub[Symbol.dispose]()

@@ -1,3 +1,4 @@
+import { withDoResetRetry } from './rpcErrors'
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { useNavigate, useParams, useRouter } from '@tanstack/react-router'
 import { RpcStub, RpcTarget } from 'capnweb'
@@ -181,7 +182,7 @@ export default function BlueprintLandingPage({ rpcStub }: Props) {
       ready() {}
     }
 
-    authenticatedApi.subscribeConnectedAccounts(new AccountsSubscriber())
+    withDoResetRetry(() => authenticatedApi.subscribeConnectedAccounts(new AccountsSubscriber()))
       .then(stub => {
         if (cancelled) {
           stub[Symbol.dispose]()

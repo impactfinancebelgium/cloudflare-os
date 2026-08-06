@@ -1,3 +1,4 @@
+import { withDoResetRetry } from './rpcErrors'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, useKumoToastManager, type PortalContainer } from '@cloudflare/kumo'
 import {
@@ -431,7 +432,7 @@ export default function GatekeeperModal({
     }
 
     const subscriber = new AccountsSubscriber()
-    authenticatedApi.subscribeConnectedAccounts(subscriber)
+    withDoResetRetry(() => authenticatedApi.subscribeConnectedAccounts(subscriber))
       .then(stub => {
         if (cancelled) {
           stub[Symbol.dispose]()
