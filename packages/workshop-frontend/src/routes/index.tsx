@@ -1,4 +1,4 @@
-import { withDoResetRetry } from "../rpcErrors";
+import { isDurableObjectResetError, logRpcFailure, reportDoResetError, withDoResetRetry } from "../rpcErrors";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useKumoToastManager } from "@cloudflare/kumo";
@@ -65,8 +65,9 @@ export function HomePageContent({ prompt }: HomeSearch) {
         setSelectedModel(getStoredSelectedModel(list));
       })
       .catch((err) => {
-        console.error("Failed to fetch models:", err);
-        toasts.add({ title: "Couldn't load AI models", variant: "error" });
+        if (!logRpcFailure("Failed to fetch models:", err)) {
+          toasts.add({ title: "Couldn't load AI models", variant: "error" });
+        }
       });
     return () => {
       cancelled = true;
@@ -117,13 +118,16 @@ export function HomePageContent({ prompt }: HomeSearch) {
         // Open the conversation we just started.
         navigate({ to: "/workspace/$id", params: { id }, search: { chat } });
       } catch (err) {
-        console.error("Failed to create gadget:", err);
+        if (isDurableObjectResetError(err)) reportDoResetError("workspace.create", err);
+        const transient = logRpcFailure("Failed to create gadget:", err);
         // A retry reuses the provisional gadget while the draft contains gadget-scoped references.
         if (!attachments?.length && !capsules?.length) {
           provisionalOverseerRef.current?.stub[Symbol.dispose]();
           provisionalOverseerRef.current = null;
         }
-        toasts.add({ title: "Failed to create workspace", variant: "error" });
+        if (!transient) {
+          toasts.add({ title: "Failed to create workspace", variant: "error" });
+        }
         throw err;
       }
     },

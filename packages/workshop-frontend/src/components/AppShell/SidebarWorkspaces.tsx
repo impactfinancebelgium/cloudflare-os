@@ -1,4 +1,4 @@
-import { withDoResetRetry } from '../../rpcErrors'
+import { logRpcFailure, withDoResetRetry } from '../../rpcErrors'
 import {
   createContext,
   useCallback,
@@ -97,7 +97,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
         setGadgetsLoading(false)
       })
       .catch((err) => {
-        console.error('Failed to load workspaces for sidebar:', err)
+        logRpcFailure('Failed to load workspaces for sidebar:', err)
         if (!cancelled) setGadgetsLoading(false)
       })
     return () => { cancelled = true }

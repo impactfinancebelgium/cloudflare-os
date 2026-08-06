@@ -58,6 +58,15 @@ export function isTransientRpcError(err: unknown): boolean {
   return cls === 'do-reset' || cls === 'connection'
 }
 
+// Logs an RPC failure: quietly for transient errors (a retry or reconnect is expected to cure
+// them), loudly otherwise. Returns true when transient so call sites can skip their toasts.
+export function logRpcFailure(message: string, err: unknown): boolean {
+  const transient = isTransientRpcError(err)
+  if (transient) console.debug(message, err)
+  else console.error(message, err)
+  return transient
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Retries an idempotent call once after a DO reset: the object restarts on its next request,

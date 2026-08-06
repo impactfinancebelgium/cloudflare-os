@@ -1,4 +1,4 @@
-import { withDoResetRetry } from './rpcErrors'
+import { logRpcFailure, withDoResetRetry } from './rpcErrors'
 import { useEffect, useState } from 'react'
 import { RpcStub } from 'capnweb'
 import { AuthenticatedApi } from '@gadgets/workshop-shared/api'
@@ -51,7 +51,7 @@ export function useVendorBranding(
     promise
       .then((map) => { if (!cancelled) setBranding(map) })
       .catch((err) => {
-        console.error('Failed to load vendor branding:', err)
+        logRpcFailure('Failed to load vendor branding:', err)
       })
 
     return () => { cancelled = true }

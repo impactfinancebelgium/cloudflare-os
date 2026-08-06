@@ -1,4 +1,4 @@
-import { withDoResetRetry } from './rpcErrors'
+import { logRpcFailure, withDoResetRetry } from './rpcErrors'
 import { useState, useEffect, useRef, useMemo, useCallback, type MutableRefObject } from 'react'
 import { Tooltip, useKumoToastManager } from '@cloudflare/kumo'
 import { Plus, CaretRight, Warning } from '@phosphor-icons/react'
@@ -162,7 +162,7 @@ export default function ResourcePicker({
             () => authenticatedApi.subscribeConnectedAccounts(subscriber))
         subscriptionRef.current = { stub }
       } catch (error) {
-        console.error('Failed to subscribe to connected accounts:', error)
+        logRpcFailure('Failed to subscribe to connected accounts:', error)
         // Nothing more is coming, so show what we have rather than hiding forever.
         setAccountsLoaded(true)
       }

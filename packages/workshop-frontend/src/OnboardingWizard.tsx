@@ -1,4 +1,4 @@
-import { withDoResetRetry } from './rpcErrors'
+import { logRpcFailure, withDoResetRetry } from './rpcErrors'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { RpcTarget } from 'capnweb'
@@ -230,7 +230,7 @@ export default function OnboardingWizard({
         }
       })
       .catch((err) => {
-        console.error('Failed to subscribe to connected accounts:', err)
+        logRpcFailure('Failed to subscribe to connected accounts:', err)
       })
 
     return () => {

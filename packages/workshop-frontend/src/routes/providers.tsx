@@ -18,6 +18,7 @@ import {
 import AddModelModal from '../AddModelModal'
 import { useDocumentTitle } from '../useDocumentTitle'
 import { MENU_CONTENT, MENU_ITEM, MENU_ITEM_DANGER } from '../components/menuStyles'
+import { withDoResetRetry } from '../rpcErrors'
 
 export const Route = createFileRoute('/providers')({ component: ProvidersPage })
 
@@ -148,8 +149,8 @@ function ProvidersPage() {
     setLoadError(false)
     try {
       const [modelList, qm, cfg] = await Promise.all([
-        authenticatedApi.listModels(),
-        authenticatedApi.getQuickModel(),
+        withDoResetRetry(() => authenticatedApi.listModels()),
+        withDoResetRetry(() => authenticatedApi.getQuickModel()),
         authenticatedApi.getAiConfig(),
       ])
       setModels(modelList)

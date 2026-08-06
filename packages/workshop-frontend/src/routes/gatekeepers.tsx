@@ -1,4 +1,4 @@
-import { withDoResetRetry } from '../rpcErrors'
+import { logRpcFailure, withDoResetRetry } from '../rpcErrors'
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
@@ -488,7 +488,7 @@ function ConnectorsPage() {
         if (!cancelled) setAddable(list)
       })
       .catch((err) => {
-        console.error('Failed to load addable gatekeepers:', err)
+        logRpcFailure('Failed to load addable gatekeepers:', err)
       })
 
     withDoResetRetry(() => authenticatedApi.listGatekeeperVendors())
@@ -513,7 +513,7 @@ function ConnectorsPage() {
         setVendorsLoaded(true)
       })
       .catch((err) => {
-        console.error('Failed to load available services:', err)
+        logRpcFailure('Failed to load available services:', err)
         if (!cancelled) setLoadError(true)
       })
 
@@ -560,7 +560,7 @@ function ConnectorsPage() {
         }
       })
       .catch((err) => {
-        console.error('Failed to subscribe to connected accounts:', err)
+        logRpcFailure('Failed to subscribe to connected accounts:', err)
         if (!cancelled) setLoadError(true)
       })
 

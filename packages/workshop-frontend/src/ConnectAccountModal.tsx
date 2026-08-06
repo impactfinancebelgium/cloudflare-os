@@ -4,6 +4,7 @@ import { RpcStub } from 'capnweb'
 import { AuthenticatedApi, GatekeeperVendorFilter } from '@gadgets/workshop-shared/api'
 import { VendorDescription } from '@gadgets/workshop-shared/gatekeeper'
 import VendorCard from './VendorCard'
+import { withDoResetRetry } from './rpcErrors'
 
 interface ConnectAccountModalProps {
   visible: boolean
@@ -41,7 +42,7 @@ export default function ConnectAccountModal({
     const fetchVendors = async () => {
       setVendorsLoading(true)
       try {
-        const vendorList = await authenticatedApi.listGatekeeperVendors(filter)
+        const vendorList = await withDoResetRetry(() => authenticatedApi.listGatekeeperVendors(filter))
         const unavailable = vendorList.filter(v => v.unavailable)
         if (unavailable.length > 0) {
           toasts.add({

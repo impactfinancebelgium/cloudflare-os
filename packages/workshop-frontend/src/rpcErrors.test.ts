@@ -5,7 +5,7 @@ vi.mock('./errorReporting', () => ({ reportIssue: vi.fn() }))
 import { reportIssue } from './errorReporting'
 import {
   classifyRpcError, getDurableObjectId, isDurableObjectResetError, isOverloadedError,
-  isTransientRpcError, reportDoResetError, withDoResetRetry,
+  isTransientRpcError, logRpcFailure, reportDoResetError, withDoResetRetry,
 } from './rpcErrors'
 
 // The reject frame observed in prod for a DO storage-timeout reset.
@@ -129,6 +129,24 @@ describe('withDoResetRetry', () => {
       expect(fn).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
+    }
+  })
+})
+
+describe('logRpcFailure', () => {
+  it('logs transient errors at debug level and returns true', () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(logRpcFailure('failed:', storageTimeoutReset())).toBe(true)
+      expect(debug).toHaveBeenCalledOnce()
+      expect(error).not.toHaveBeenCalled()
+
+      expect(logRpcFailure('failed:', new Error('Workspace not found.'))).toBe(false)
+      expect(error).toHaveBeenCalledOnce()
+    } finally {
+      debug.mockRestore()
+      error.mockRestore()
     }
   })
 })
