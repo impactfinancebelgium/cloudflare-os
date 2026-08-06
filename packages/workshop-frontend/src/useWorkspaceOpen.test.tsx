@@ -37,6 +37,13 @@ function api(overseer: RpcStub<Overseer>): RpcStub<AuthenticatedApi> {
   return { openGadget: () => overseer } as unknown as RpcStub<AuthenticatedApi>
 }
 
+function resetError() {
+  return Object.assign(
+    new Error('Durable Object storage operation exceeded timeout which caused object to be reset.'),
+    { durableObjectReset: true },
+  )
+}
+
 const METADATA = {
   id: 'workspace-1',
   title: 'Quarterly planning',
@@ -51,6 +58,7 @@ function WorkspaceProbe({ authenticatedApi }: { authenticatedApi: RpcStub<Authen
     onMetadata: () => {},
     onShareKeyConsumed: () => {},
   })
+  if (state.connectionLost) return <p>reconnecting</p>
   if (state.error?.kind === 'open') {
     return (
       <WorkspaceOpenErrorPage
@@ -140,5 +148,95 @@ describe('useWorkspaceOpen', () => {
     expect(document.title).toBe('Cloudflare OS')
     expect(firstSubscriptionDispose).toHaveBeenCalledOnce()
     expect(deniedOverseerDispose).toHaveBeenCalledOnce()
+  })
+
+  it('coalesces a burst of DO-reset errors into one reopen', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(console, 'debug').mockImplementation(() => {})
+    try {
+      let captured!: ReturnType<typeof useWorkspaceOpen>
+      const openGadget = vi.fn<() => RpcStub<Overseer>>(() => disposableStub({
+        subscribeToMetadata: async (callback: (metadata: GadgetMetadata) => void) => {
+          callback(METADATA)
+          return disposableStub({}) as RpcStub<{}>
+        },
+      }) as unknown as RpcStub<Overseer>)
+      const authenticatedApi = { openGadget } as unknown as RpcStub<AuthenticatedApi>
+
+      function Probe() {
+        captured = useWorkspaceOpen({
+          id: 'workspace-1',
+          authenticatedApi,
+          onInvalidShareKey: () => {},
+          onMetadata: () => {},
+          onShareKeyConsumed: () => {},
+        })
+        return null
+      }
+
+      container = document.createElement('div')
+      document.body.append(container)
+      root = createRoot(container)
+      await act(async () => root!.render(<Probe />))
+      expect(openGadget).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        for (let i = 0; i < 5; i++) expect(captured.notifyWorkspaceRpcError(resetError())).toBe(true)
+      })
+      await act(async () => { vi.advanceTimersByTime(600) })
+      expect(openGadget).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not reopen for non-reset errors', async () => {
+    vi.useFakeTimers()
+    try {
+      let captured!: ReturnType<typeof useWorkspaceOpen>
+      const openGadget = vi.fn<() => RpcStub<Overseer>>(() => disposableStub({
+        subscribeToMetadata: async () => disposableStub({}) as RpcStub<{}>,
+      }) as unknown as RpcStub<Overseer>)
+      const authenticatedApi = { openGadget } as unknown as RpcStub<AuthenticatedApi>
+
+      function Probe() {
+        captured = useWorkspaceOpen({
+          id: 'workspace-1',
+          authenticatedApi,
+          onInvalidShareKey: () => {},
+          onMetadata: () => {},
+          onShareKeyConsumed: () => {},
+        })
+        return null
+      }
+
+      container = document.createElement('div')
+      document.body.append(container)
+      root = createRoot(container)
+      await act(async () => root!.render(<Probe />))
+
+      act(() => {
+        expect(captured.notifyWorkspaceRpcError(new Error('Peer closed WebSocket: 1006 '))).toBe(false)
+      })
+      await act(async () => { vi.advanceTimersByTime(6000) })
+      expect(openGadget).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows reconnecting instead of a terminal error when the initial open fails transiently', async () => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {})
+    const overseer = disposableStub({
+      subscribeToMetadata: vi.fn<() => Promise<RpcStub<{}>>>(async () => { throw resetError() }),
+    }) as unknown as RpcStub<Overseer>
+
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => root!.render(<WorkspaceProbe authenticatedApi={api(overseer)} />))
+
+    expect(container.textContent).toContain('reconnecting')
+    expect(container.textContent).not.toContain('access')
   })
 })

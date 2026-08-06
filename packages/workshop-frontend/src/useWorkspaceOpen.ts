@@ -9,6 +9,9 @@ import type {
   Overseer,
 } from '@gadgets/workshop-shared/api'
 import { reportIssue } from './errorReporting'
+import {
+  isDurableObjectResetError, isTransientRpcError, logRpcFailure, reportDoResetError,
+} from './rpcErrors'
 import { useDocumentTitle } from './useDocumentTitle'
 import {
   classifyWorkspaceOpenFailure,
@@ -50,10 +53,33 @@ export function useWorkspaceOpen({
   const [reloadNonce, setReloadNonce] = useState(0)
   const openWorkspaceIdRef = useRef<string | undefined>(undefined)
   const pendingObserverRejectRef = useRef<((error: unknown) => void) | null>(null)
+  const reopenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reopenGapMsRef = useRef(0)
   const callbacksRef = useRef({ onMetadata, onShareKeyConsumed, onInvalidShareKey })
   callbacksRef.current = { onMetadata, onShareKeyConsumed, onInvalidShareKey }
 
   useDocumentTitle(error ? '' : metadata?.title)
+
+  // Coalesces error bursts (every subscribed component fails at once) into one reopen, with
+  // growing gaps so a wedged DO isn't hammered from every open tab: first reopen after a short
+  // coalescing delay, then 5s doubling to a 60s cap. The gap resets on a successful open.
+  const scheduleReopen = () => {
+    if (reopenTimerRef.current !== null) return
+    reopenTimerRef.current = setTimeout(() => {
+      reopenTimerRef.current = null
+      setReloadNonce(value => value + 1)
+    }, Math.max(500, reopenGapMsRef.current))
+    reopenGapMsRef.current = Math.min(Math.max(reopenGapMsRef.current * 2, 5000), 60000)
+  }
+
+  // A DO reset rejects in-flight RPCs while the socket stays healthy, so nothing re-runs the
+  // open effect on its own. Returns true when the error was a DO reset.
+  const notifyWorkspaceRpcError = (err: unknown, site = 'workspace.rpc'): boolean => {
+    if (!isDurableObjectResetError(err)) return false
+    reportDoResetError(site, err, { gadgetId: id })
+    scheduleReopen()
+    return true
+  }
 
   useEffect(() => {
     let overseerStub: RpcStub<Overseer> | null = null
@@ -116,6 +142,9 @@ export function useWorkspaceOpen({
         configureObservers = new RpcStub(configureObserversTarget)
 
         overseerStub = authenticatedApi.openGadget(id, shareKey, configureObservers)
+        // No onRpcBroken here: a workerd probe showed it never fires for a DO-backed capability
+        // while the session lives (session-teardown only), so recovery rides on call-site
+        // classification via notifyWorkspaceRpcError instead.
         setOverseer({ stub: overseerStub })
 
         const resolvedSubscription = await overseerStub.subscribeToMetadata((nextMetadata) => {
@@ -130,11 +159,12 @@ export function useWorkspaceOpen({
         metadataSubscription = resolvedSubscription
 
         openWorkspaceIdRef.current = id
+        reopenGapMsRef.current = 0
         setError(null)
         if (connectionLost) setConnectionLost(false)
       } catch (caught) {
         if (cancelled) return
-        console.error('Failed to load gadget:', caught)
+        logRpcFailure('Failed to load gadget:', caught)
 
         // TODO: Give share-link and observer failures stable codes so this remaining legacy
         // message classification can be removed.
@@ -155,6 +185,14 @@ export function useWorkspaceOpen({
           const failure = classifyWorkspaceOpenFailure(caught)
           if (failure !== 'unexpected') {
             showTerminalError({ kind: 'open', failure })
+          } else if (isTransientRpcError(caught)) {
+            // Reset or dropped connection: keep the workspace mounted, show "Reconnecting…", and
+            // retry on the growing schedule — a failure on a healthy socket gets no other retry.
+            if (isDurableObjectResetError(caught)) {
+              reportDoResetError('workspace.open', caught, { gadgetId: id })
+            }
+            scheduleReopen()
+            if (!connectionLost) setConnectionLost(true)
           } else if (!hadOpenWorkspace) {
             reportIssue('gadget.load', caught, { gadgetId: id })
             showTerminalError({ kind: 'open', failure })
@@ -168,6 +206,10 @@ export function useWorkspaceOpen({
     void load()
     return () => {
       cancelled = true
+      if (reopenTimerRef.current !== null) {
+        clearTimeout(reopenTimerRef.current)
+        reopenTimerRef.current = null
+      }
       if (pendingObserverRejectRef.current) {
         pendingObserverRejectRef.current(new Error('Cancelled'))
         pendingObserverRejectRef.current = null
@@ -183,6 +225,7 @@ export function useWorkspaceOpen({
     error,
     connectionLost,
     observerConfig,
+    notifyWorkspaceRpcError,
     retry() {
       setError(null)
       setReloadNonce(value => value + 1)

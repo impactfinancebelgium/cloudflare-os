@@ -455,6 +455,7 @@ export default function GadgetEditor() {
     retry: retryOpen,
     cancelObserverConfig,
     updateTitle,
+    notifyWorkspaceRpcError,
   } = useWorkspaceOpen({
     id,
     authenticatedApi,
@@ -1483,6 +1484,7 @@ export default function GadgetEditor() {
                 <ChatInterface
                   key={id}
                   overseer={overseer.stub}
+                  onWorkspaceRpcError={notifyWorkspaceRpcError}
                   selectedChatId={effectiveSelectedChatId}
                   onNavigateToChat={navigateToChat}
                   onProposedChangesChange={setProposedChanges}
