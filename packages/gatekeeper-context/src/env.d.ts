@@ -6,6 +6,10 @@ declare namespace Cloudflare {
     CONTEXT_COLLECTIONS: KVNamespace;
     // Optional Git-compatible backing repos for artifact-backed context collections.
     ARTIFACTS?: Artifacts;
+    // IFB fork: bearer secret gating /admin-api/* (Worker secret) and the sharing
+    // domain those admin calls operate on (defaults to "production").
+    CONTEXT_ADMIN_TOKEN?: string;
+    SHARING_DOMAIN?: string;
   }
 
   interface GlobalProps {

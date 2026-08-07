@@ -8,9 +8,15 @@ export {
   GatekeeperVendor, ContextAccount, ContextVerifier, ContextGatekeeper,
 } from "./library-gatekeeper.js";
 
-// Keep ES Module worker format; this worker is used over RPC/DOs, not HTTP.
+import { handleAdminApi } from "./admin-api.js";
+
+// IFB fork: /admin-api/* is a bearer-secret programmatic management surface
+// (see admin-api.ts); everything else keeps the upstream RPC/DO-only posture.
 export default {
-  async fetch(): Promise<Response> {
+  async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext): Promise<Response> {
+    if (new URL(request.url).pathname.startsWith("/admin-api")) {
+      return handleAdminApi(request, env, ctx);
+    }
     return new Response("Context Library worker is running.", {
       headers: { "content-type": "text/plain" },
     });
