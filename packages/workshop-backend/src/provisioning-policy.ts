@@ -14,7 +14,11 @@
 import { AmbientGatekeeperMode } from "@gadgets/workshop-shared/api";
 import { AdminConfig } from "./admin-config.js";
 
-export const DEFAULT_AMBIENT_GATEKEEPER_MODE: AmbientGatekeeperMode = "optional";
+// IFB fork: default "enabled" instead of upstream's "optional". This deployment's ambient
+// vendors are all IFB-built, credential-holding, team-scoped capabilities (Context, Twenty,
+// website, SharePoint, scheduler) that every team member should have without a manual
+// connect step. Admins can still set any vendor to optional/disabled in /admin.
+export const DEFAULT_AMBIENT_GATEKEEPER_MODE: AmbientGatekeeperMode = "enabled";
 
 // The configured mode for an ambient vendor, defaulting to "optional" when the admin hasn't set one.
 // Tolerates a config persisted before this field existed (ambientGatekeeperModes may be undefined).
