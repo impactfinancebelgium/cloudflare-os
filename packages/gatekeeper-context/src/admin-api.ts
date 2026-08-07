@@ -93,6 +93,28 @@ export async function handleAdminApi(
       if (request.method === "GET" && parts[2] === "documents") {
         return json(await api.listContextDocuments(id, url.searchParams.get("prefix") ?? undefined));
       }
+      // PUT/DELETE /admin-api/collections/<id>/documents?path=<doc path>
+      // Body for PUT: {description, body, contentType?}. This is the no-Artifacts
+      // ingestion path: a sync script pushes curated files straight into the
+      // collection until git-backed collections unlock on this account.
+      if (parts[2] === "documents" && (request.method === "PUT" || request.method === "DELETE")) {
+        const path = url.searchParams.get("path");
+        if (!path) return json({ error: "path query parameter is required" }, 400);
+        if (request.method === "DELETE") {
+          await api.deleteContextDocument(id, path);
+          return json({ deleted: path });
+        }
+        const doc = (await request.json()) as {
+          description?: string; body?: string; contentType?: string;
+        };
+        if (typeof doc.body !== "string") return json({ error: "body is required" }, 400);
+        await api.putContextDocument(id, path, {
+          description: doc.description ?? "",
+          body: doc.body,
+          ...(doc.contentType ? { contentType: doc.contentType } : {}),
+        });
+        return json({ put: path });
+      }
     }
 
     return json({ error: "unknown admin-api route" }, 404);
