@@ -917,7 +917,7 @@ export type CloudflareAccountOption = {
 };
 
 // Supported AI providers.
-export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama";
+export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama" | "openrouter";
 
 // Information about the AI gateway configuration. Returned by `AuthenticatedApi.getAiConfig()`.
 export type AiGatewayInfo = {
@@ -984,6 +984,11 @@ export const SUGGESTED_MODELS: Record<
     "gemini-3.6-flash": {name: "Gemini 3.6 Flash", contextWindow: 1048576},
   },
   "ollama": {
+  },
+  // IFB patch: OpenRouter provider, added for Kimi K3 (not on Workers AI, and cloudflare-os
+  // has no direct Moonshot provider). Key lives in the AI Gateway (BYOK), not in the worker.
+  "openrouter": {
+    "moonshotai/kimi-k3": {name: "Kimi K3 (OpenRouter)", contextWindow: 1048576, outputLimit: 131072},
   },
 };
 

@@ -12,6 +12,7 @@ import { ANTHROPIC_MODELS } from "@earendil-works/pi-ai/providers/anthropic.mode
 import { CLOUDFLARE_WORKERS_AI_MODELS } from "@earendil-works/pi-ai/providers/cloudflare-workers-ai.models";
 import { GOOGLE_MODELS } from "@earendil-works/pi-ai/providers/google.models";
 import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
+import { OPENROUTER_MODELS } from "@earendil-works/pi-ai/providers/openrouter.models";
 import { ApprovalQueue, Gatekeeper, ResourceDescription } from '@gadgets/workshop-shared/gatekeeper';
 import { LanguageModelBinding } from "./ai-model-binding";
 import AI_MODEL_BINDING_TYPES from "./ai-model-binding.txt";
@@ -123,6 +124,7 @@ function catalogModel(provider: AiModelConfig["provider"], modelId: string): Mod
     case "openai": return (OPENAI_MODELS as Record<string, Model<Api>>)[modelId];
     case "google": return (GOOGLE_MODELS as Record<string, Model<Api>>)[modelId];
     case "cloudflare": return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
+    case "openrouter": return (OPENROUTER_MODELS as Record<string, Model<Api>>)[modelId];
     case "ollama": return undefined;
     default: return undefined;
   }
@@ -230,6 +232,22 @@ function gatewayNativeModel(config: AiModelConfig, gatewayUrl: string): Model<Ap
         cost: catalog?.cost ?? ZERO_COST,
         ...window,
         compat: workersAiCompat(catalog),
+      };
+    case "openrouter":
+      // IFB patch: OpenRouter through the gateway's /openrouter path (OpenAI-completions
+      // compatible). Provider key is stored in the AI Gateway (BYOK); the worker only holds
+      // cf-aig-authorization, same as every other provider here.
+      return {
+        id: config.model,
+        name: catalog?.name ?? config.model,
+        api: "openai-completions",
+        provider: "openrouter",
+        baseUrl: `${gatewayUrl}/openrouter`,
+        reasoning: catalog?.reasoning ?? true,
+        input: catalog?.input ?? ["text"],
+        cost: catalog?.cost ?? ZERO_COST,
+        ...window,
+        compat: catalog?.compat,
       };
     default:
       return undefined;
@@ -582,6 +600,25 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
           cost: catalog?.cost ?? ZERO_COST,
           ...window,
           thinkingLevelMap: catalog?.thinkingLevelMap,
+          compat: catalog?.compat,
+        },
+        apiKey: config.apiToken,
+        sessionAffinity,
+      });
+    case "openrouter":
+      // IFB patch: direct OpenRouter with a user-supplied key (the /admin "add model" path).
+      // Platform-funded traffic goes through the AI Gateway instead (gatewayNativeModel).
+      return makeHandle({
+        model: {
+          id: config.model,
+          name: catalog?.name ?? config.model,
+          api: "openai-completions",
+          provider: "openrouter",
+          baseUrl: config.apiUrl ?? "https://openrouter.ai/api/v1",
+          reasoning: catalog?.reasoning ?? true,
+          input: catalog?.input ?? ["text"],
+          cost: catalog?.cost ?? ZERO_COST,
+          ...window,
           compat: catalog?.compat,
         },
         apiKey: config.apiToken,
