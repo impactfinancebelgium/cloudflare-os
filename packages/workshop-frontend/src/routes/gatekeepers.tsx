@@ -552,8 +552,11 @@ function ConnectorsPage() {
 
     const subscriber = new AccountsSubscriber()
 
+    // IFB fork: also show forced ("enabled") ambient accounts. Upstream hides them here,
+    // which leaves this page empty on deployments that enable every vendor for everyone;
+    // showing them gives the team a visible inventory (removal stays admin-only).
     authenticatedApi
-      .subscribeConnectedAccounts(subscriber)
+      .subscribeConnectedAccounts(subscriber, { includeForcedAutoProvisionedAccounts: true })
       .then((stub) => {
         if (cancelled) {
           stub[Symbol.dispose]()
